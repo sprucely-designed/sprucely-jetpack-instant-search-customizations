@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Sprucely — Jetpack Instant Search Wholesale Visibility
  * Description:       Hide the "wholesale" product category from Jetpack Instant Search results and filters for non-wholesale users (role: wholesale_customer).
- * Version:           1.0.0
+ * Version:           1.0.1
  * Author:            Sprucely (sprucely.net)
  * Text Domain:       spr-jetpack-instant-search-wholesale-visibility
  * Requires at least: 6.3
@@ -55,8 +55,7 @@ final class Spr_Jetpack_Instant_Search_Wholesale_Visibility {
 	 * Hook up behaviors.
 	 */
 	private function __construct() {
-		// Role-aware result filtering for Jetpack Instant Search.
-		add_filter( 'jetpack_instant_search_options', array( $this, 'spr_filter_instant_search_options' ) );
+		add_filter( 'jetpack_instant_search_options', array( $this, 'spr_filter_instant_search_options' ), 999 );
 
 		// Progressive enhancement: hide the wholesale facet option in the overlay sidebar for non-wholesale users.
 		add_action( 'wp_enqueue_scripts', array( $this, 'spr_enqueue_overlay_fallback_assets' ) );
@@ -92,41 +91,39 @@ final class Spr_Jetpack_Instant_Search_Wholesale_Visibility {
 	 * @return array Modified options.
 	 */
 	public function spr_filter_instant_search_options( $options ) {
-		// Allow wholesale-capable users to see everything.
 		if ( $this->spr_user_can_view_wholesale() ) {
 			return $options;
 		}
 
 		$wholesale_slug = sanitize_title( (string) apply_filters( 'spr_wholesale_category_slug', self::WHOLESALE_SLUG ) );
 
-		// Build a bool query restricting to products and excluding the wholesale category.
-		$product_type_term  = array( 'term' => array( 'post_type' => 'product' ) );
-		$category_exclusion = array( 'term' => array( 'taxonomy.product_cat.slug' => $wholesale_slug ) );
+		// Branch A: Anything that's NOT a product stays eligible.
+		$not_product = array(
+			'bool' => array(
+				'must_not' => array(
+					array( 'term' => array( 'post_type' => 'product' ) ),
+				),
+			),
+		);
 
-		$existing = ( isset( $options['adminQueryFilter'] ) && is_array( $options['adminQueryFilter'] ) )
-			? $options['adminQueryFilter']
-			: array();
+		// Branch B: It's a product, but NOT in the wholesale category.
+		$product_not_wholesale = array(
+			'bool' => array(
+				'must'     => array(
+					array( 'term' => array( 'post_type' => 'product' ) ),
+				),
+				'must_not' => array(
+					array( 'term' => array( 'taxonomy.product_cat.slug' => $wholesale_slug ) ),
+				),
+			),
+		);
 
-		if ( ! isset( $existing['bool'] ) ) {
-			$existing['bool'] = array();
-		}
-		if ( empty( $existing['bool']['must'] ) ) {
-			$existing['bool']['must'] = array();
-		}
-		if ( empty( $existing['bool']['must_not'] ) ) {
-			$existing['bool']['must_not'] = array();
-		}
-
-		$existing['bool']['must'][]     = $product_type_term;
-		$existing['bool']['must_not'][] = $category_exclusion;
-
-		$options['adminQueryFilter'] = $existing;
-
-		/**
-		 * Why this also hides the facet:
-		 * Jetpack builds facet aggregations from the filtered result set (taxonomy.* fields are aggregatable),
-		 * so once wholesale products are excluded, the 'wholesale' term won't have any hits to display. :contentReference[oaicite:2]{index=2}
-		 */
+		$options['adminQueryFilter'] = array(
+			'bool' => array(
+				'should'               => array( $not_product, $product_not_wholesale ),
+				'minimum_should_match' => 1, // At least one branch must match.
+			),
+		);
 
 		return $options;
 	}
@@ -153,7 +150,7 @@ final class Spr_Jetpack_Instant_Search_Wholesale_Visibility {
 CSS;
 
 		// We attach our own handle to guarantee printing even if theme doesn't enqueue block styles.
-		wp_register_style( 'spr-jetpack-wholesale-css', false, array(), '1.0.0' );
+		wp_register_style( 'spr-jetpack-wholesale-css', false, array(), '1.0.1' );
 		wp_enqueue_style( 'spr-jetpack-wholesale-css' );
 		wp_add_inline_style( 'spr-jetpack-wholesale-css', $css );
 
@@ -193,7 +190,7 @@ CSS;
 })();
 JS;
 
-		wp_register_script( 'spr-jetpack-wholesale-js', '', array(), '1.0.0', true );
+		wp_register_script( 'spr-jetpack-wholesale-js', '', array(), '1.0.1', true );
 		wp_enqueue_script( 'spr-jetpack-wholesale-js' );
 		wp_add_inline_script( 'spr-jetpack-wholesale-js', $js, 'after' );
 	}
